@@ -11,10 +11,10 @@ import com.example.opendash.util.DebugLog
 
 /**
  * MediaCodec H.264 encoder for the Tripper Dash stream:
- *   526 × 300, up to 24 fps, ~1.2 Mbps, Baseline L4.1, 1-second IDR interval.
+ *   526 x 300, 2-4 fps, ~200 kbps, Baseline L4.1, 1-second IDR interval.
  *
- * [FPS] is the MAX/hint rate — the frame loop feeds ~24 fps while moving (buttery,
- * Android-Auto-style motion) and throttles to a few fps when stopped to save power.
+ * [FPS] is the maximum encoder hint. The frame loop feeds 4 fps while moving and
+ * throttles to 2 fps when stopped, matching the stable RE projection envelope.
  * The hardware encoder auto-timestamps each frame from the input surface, so the
  * variable feed rate is fine. Tiny resolution → still far under the OLED-projection
  * draw this whole project exists to avoid.
@@ -29,8 +29,8 @@ class DashEncoder(private val onEncodedData: (ByteArray, Boolean) -> Unit) {
     companion object {
         const val WIDTH   = 526
         const val HEIGHT  = 300
-        const val FPS     = 24
-        const val BITRATE = 1_200_000
+        const val FPS     = 4
+        const val BITRATE = 200_000
         private const val MIME = MediaFormat.MIMETYPE_VIDEO_AVC
         private const val DRAIN_TIMEOUT_US = 10_000L
         private const val TAG = "DashEncoder"

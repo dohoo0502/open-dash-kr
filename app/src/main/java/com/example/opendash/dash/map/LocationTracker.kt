@@ -33,24 +33,35 @@ class LocationTracker(context: Context) {
         }
     }
 
-    /**
-     * Decide whether [loc] should replace [cur].
-     *  - GPS always wins.
-     *  - A coarse NETWORK fix is ignored while a recent GPS fix exists — otherwise it
-     *    jumps the marker (and the camera/route) to a cell-tower estimate km away,
-     *    which is exactly what happens with the screen off as GPS callbacks slow.
-     *  - Physically impossible jumps (bad fixes) are rejected.
-     */
+    private var rejectStreak = 0
+
     private fun acceptFix(cur: Location?, loc: Location): Boolean {
-        if (cur == null) return true
+        if (cur == null) {
+            rejectStreak = 0
+            return true
+        }
         val isGps = loc.provider == LocationManager.GPS_PROVIDER
         if (!isGps && cur.provider == LocationManager.GPS_PROVIDER &&
             loc.time - cur.time < GPS_STALE_MS
         ) return false
         if (loc.time < cur.time) return false
         val dt = (loc.time - cur.time) / 1000.0
-        if (dt > 0 && cur.distanceTo(loc) > 200f && cur.distanceTo(loc) / dt > 85.0) return false
+        val jump = cur.distanceTo(loc)
+        if (dt > 0 && jump > 200f && jump / dt > 85.0) return reject()
+        if (dt in 0.0..6.0 && rejectStreak < 3) {
+            val plausibleSpeed = maxOf(cur.speed, loc.speed).coerceAtLeast(1f)
+            val expected = plausibleSpeed * dt
+            val noise = loc.accuracy + cur.accuracy
+            val gate = expected + noise * 1.5 + 12f
+            if (jump > gate && jump > 25f) return reject()
+        }
+        rejectStreak = 0
         return true
+    }
+
+    private fun reject(): Boolean {
+        rejectStreak++
+        return false
     }
 
     private var running = false
@@ -68,7 +79,7 @@ class LocationTracker(context: Context) {
             // ages out, and a coarse NETWORK fix takes over → the marker drifts.
             for (provider in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)) {
                 if (lm.isProviderEnabled(provider)) {
-                    lm.requestLocationUpdates(provider, 1_000L, 0f, listener, Looper.getMainLooper())
+                    lm.requestLocationUpdates(provider, 500L, 0f, listener, Looper.getMainLooper())
                 }
             }
             running = true

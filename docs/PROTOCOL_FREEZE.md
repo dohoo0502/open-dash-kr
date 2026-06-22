@@ -126,6 +126,18 @@ packetization rules, RTP target, and RTP send path must not change.
 
 ## Review Rule
 
+### Approved media/call extension
+
+The upstream RE-matched media and call cards are an explicitly reviewed additive
+exception to this freeze:
+
+- `05 0D` carries NUL-separated now-playing title, album, and artist fields.
+- `05 22` carries a NUL-terminated caller display name and an empty clear value.
+- These cards may repeat at 1 Hz only while streaming.
+- They must not alter connection order, authentication, ACK handling, route cards,
+  projection cadence, socket targets, RTP packetization, or H.264 framing.
+- Album-art `05 40` fragments remain disabled until their inner framing is verified.
+
 Any change touching the frozen files above must answer:
 
 - Does this change alter the on-wire bytes?

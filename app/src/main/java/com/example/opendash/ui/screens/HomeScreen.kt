@@ -24,15 +24,21 @@ import com.example.opendash.ui.OpenDashIcons
 import com.example.opendash.ui.components.*
 import com.example.opendash.ui.theme.*
 import com.example.opendash.viewmodel.ConnectionState
+import com.example.opendash.viewmodel.RidesViewModel
 import com.example.opendash.viewmodel.RouteViewModel
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun HomeScreen(
     conn: ConnectionState,
     onNavigate: (String) -> Unit,
     routeViewModel: RouteViewModel = viewModel(),
+    ridesViewModel: RidesViewModel = viewModel(),
 ) {
     val saved by routeViewModel.saved.collectAsState()
+    val rides by ridesViewModel.rides.collectAsState()
     val status = when (conn) {
         ConnectionState.Connected -> Triple("Connected", "Streaming to Tripper Dash", Gold)
         ConnectionState.Searching -> Triple("Searching…", "Looking for Tripper Dash", Warn)
@@ -127,14 +133,6 @@ fun HomeScreen(
                 trailingIcon = true,
                 onClick = { onNavigate("dash") },
             )
-            OpenDashDivider(Modifier.padding(horizontal = 4.dp))
-            OpenDashRow(
-                "Ride history",
-                icon = OpenDashIcons.History,
-                sub = "Review recorded rides and tracks",
-                trailingIcon = true,
-                onClick = { onNavigate("rides") },
-            )
         }
 
         Spacer(Modifier.height(18.dp))
@@ -161,5 +159,49 @@ fun HomeScreen(
                 }
             }
         }
+
+        Spacer(Modifier.height(18.dp))
+
+        Eyebrow("Rides", Modifier.padding(bottom = 6.dp, start = 4.dp))
+        OpenDashCard(modifier = Modifier.fillMaxWidth(), padding = 6.dp) {
+            if (rides.isEmpty()) {
+                OpenDashRow(
+                    "No rides recorded yet",
+                    icon = OpenDashIcons.History,
+                    sub = "Connected rides appear here automatically",
+                    trailingIcon = false,
+                    onClick = {},
+                )
+            } else {
+                val totalKm = rides.sumOf { it.distanceKm }
+                val totalMinutes = rides.sumOf { it.durationSec } / 60
+                OpenDashRow(
+                    "${rides.size} rides · %.1f km".format(totalKm),
+                    icon = OpenDashIcons.History,
+                    sub = "$totalMinutes min recorded · View full history",
+                    trailingIcon = true,
+                    onClick = { onNavigate("rides") },
+                )
+                rides.take(3).forEach { ride ->
+                    OpenDashDivider(Modifier.padding(horizontal = 4.dp))
+                    OpenDashRow(
+                        "%.1f km · %s".format(ride.distanceKm, formatRideDuration(ride.durationSec)),
+                        icon = OpenDashIcons.Navi,
+                        sub = formatRideDate(ride.startMs),
+                        trailingIcon = false,
+                        onClick = { onNavigate("rides") },
+                    )
+                }
+            }
+        }
     }
+}
+
+private fun formatRideDate(timeMs: Long): String =
+    SimpleDateFormat("d MMM yyyy, h:mm a", Locale.getDefault()).format(Date(timeMs))
+
+private fun formatRideDuration(seconds: Long): String {
+    val hours = seconds / 3600
+    val minutes = (seconds % 3600) / 60
+    return if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m"
 }

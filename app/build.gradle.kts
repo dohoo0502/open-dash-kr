@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -12,6 +14,12 @@ if (project.file("google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
 }
 
+val localProperties = Properties().apply {
+    rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use(::load)
+}
+val googleWebClientId = providers.gradleProperty("GOOGLE_WEB_CLIENT_ID").orNull
+    ?: localProperties.getProperty("GOOGLE_WEB_CLIENT_ID").orEmpty()
+
 android {
     namespace = "com.example.opendash"
     compileSdk {
@@ -24,8 +32,14 @@ android {
         applicationId = "com.opendash.app"
         minSdk = 24
         targetSdk = 36
-        versionCode = 13
-        versionName = "1.3"
+        versionCode = 14
+        versionName = "1.3-beta.2"
+
+        buildConfigField(
+            "String",
+            "GOOGLE_WEB_CLIENT_ID",
+            "\"${googleWebClientId.replace("\\", "\\\\").replace("\"", "\\\"")}\"",
+        )
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -80,6 +94,18 @@ android {
         buildConfig = true
         compose = true
         resValues = true
+    }
+
+    // GitHub releases can publish the matching ABI APK (arm64 for most current phones)
+    // instead of forcing every device to download all four MapLibre native libraries.
+    // The universal artifact remains available for simple local/debug installation.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            isUniversalApk = true
+        }
     }
 }
 

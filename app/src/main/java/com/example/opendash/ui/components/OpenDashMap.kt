@@ -66,6 +66,7 @@ fun OpenDashMap(
     var lineMgr by remember { mutableStateOf<LineManager?>(null) }
     var symbolMgr by remember { mutableStateOf<SymbolManager?>(null) }
     var styleReady by remember { mutableStateOf(false) }
+    var destroyed by remember { mutableStateOf(false) }
 
     // Bind the MapView to the composition lifecycle.
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -83,14 +84,15 @@ fun OpenDashMap(
         }
         lifecycleOwner.lifecycle.addObserver(obs)
         onDispose {
+            destroyed = true
             lifecycleOwner.lifecycle.removeObserver(obs)
-            lineMgr?.onDestroy(); symbolMgr?.onDestroy()
             mapView.onDestroy()
         }
     }
 
     LaunchedEffect(mapView) {
         mapView.getMapAsync { m ->
+            if (destroyed) return@getMapAsync
             map = m
             m.uiSettings.apply {
                 isRotateGesturesEnabled = false
@@ -100,6 +102,7 @@ fun OpenDashMap(
                 isLogoEnabled = false
             }
             m.setStyle(Style.Builder().fromUri(STYLE_URL)) { style ->
+                if (destroyed) return@setStyle
                 style.addImage(RIDER_ICON, chevronBitmap())
                 style.addImage(DEST_ICON, destPinBitmap())
                 lineMgr = LineManager(mapView, m, style)
@@ -113,6 +116,7 @@ fun OpenDashMap(
 
     // Redraw route + markers whenever the data or mode changes.
     LaunchedEffect(styleReady, routePoints.size, dest, riderLat, riderLng, riderBearing, navMode) {
+        if (destroyed) return@LaunchedEffect
         val lm = lineMgr ?: return@LaunchedEffect
         val sm = symbolMgr ?: return@LaunchedEffect
         lm.deleteAll(); sm.deleteAll()
@@ -133,6 +137,7 @@ fun OpenDashMap(
 
     // Camera control.
     LaunchedEffect(styleReady, riderLat, riderLng, riderBearing, navMode, fitRoute, routePoints.size) {
+        if (destroyed) return@LaunchedEffect
         val m = map ?: return@LaunchedEffect
         if (!styleReady) return@LaunchedEffect
         when {

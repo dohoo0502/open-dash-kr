@@ -255,6 +255,35 @@ object DashCommands {
         return ("%04X".format(outerLen) + innerHex).hexToBytes()
     }
 
+    // Captured from the official RE app. These are additive media/call cards and do not
+    // alter auth, projection, route-card, ACK, or RTP packet behavior.
+    private const val MEDIA_FIELD_MAX = 20
+
+    private fun mediaField(value: String): ByteArray =
+        value.take(MEDIA_FIELD_MAX).toByteArray(Charsets.UTF_8)
+
+    /** 05 0D: title, album, and artist as NUL-separated UTF-8 fields. */
+    fun nowPlaying(title: String, album: String, artist: String): ByteArray {
+        val value = ByteArrayOutputStream().apply {
+            write(mediaField(title))
+            write(0)
+            write(mediaField(album))
+            write(0)
+            write(mediaField(artist))
+        }.toByteArray()
+        return K1GPacket.build(K1GPacket.tlv(0x05, 0x0D, value))
+    }
+
+    /** 05 22: NUL-terminated caller display name. */
+    fun callNotify(callerName: String): ByteArray =
+        K1GPacket.build(
+            K1GPacket.tlv(0x05, 0x22, mediaField(callerName) + 0x00.toByte()),
+        )
+
+    /** Clears a previously repeated 05 22 call card. */
+    fun callClear(): ByteArray =
+        K1GPacket.build(K1GPacket.tlv(0x05, 0x22, byteArrayOf(0x00)))
+
     private fun indexOf(haystack: ByteArray, needle: ByteArray, fromEnd: Boolean = false): Int {
         val range = if (fromEnd) (haystack.size - needle.size downTo 0) else (0..haystack.size - needle.size)
         outer@ for (i in range) {

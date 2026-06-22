@@ -20,6 +20,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -42,6 +44,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -49,6 +52,10 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import com.example.opendash.BuildConfig
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.example.opendash.ui.OpenDashIcons
 import com.example.opendash.ui.components.*
 import com.example.opendash.ui.theme.*
@@ -81,7 +88,30 @@ fun SettingsScreen(
     var keepAwake   by remember { mutableStateOf(true) }
     var units       by remember { mutableStateOf("Kilometres") }
     val ctx = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    fun callPermissionGranted(): Boolean = ContextCompat.checkSelfPermission(
+        ctx,
+        android.Manifest.permission.ANSWER_PHONE_CALLS,
+    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    var mediaAccessGranted by remember {
+        mutableStateOf(com.example.opendash.media.MediaInfoProvider.isAccessGranted(ctx))
+    }
+    var callAccessGranted by remember { mutableStateOf(callPermissionGranted()) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                mediaAccessGranted = com.example.opendash.media.MediaInfoProvider.isAccessGranted(ctx)
+                callAccessGranted = callPermissionGranted()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val callPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { callAccessGranted = it }
     val selectedTheme by OpenDashThemeController.variant.collectAsState()
+    var themeMenuExpanded by remember { mutableStateOf(false) }
     var pendingWallpaperUri by remember { mutableStateOf<Uri?>(null) }
     var pendingWallpaperPreview by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
     var cropX by remember { mutableFloatStateOf(0f) }
@@ -158,7 +188,7 @@ fun SettingsScreen(
                 control = {
                     OpenDashBtn(
                         "Check",
-                        onClick = { updateMessage = "OpenDash 1.3 is installed. Check GitHub Releases for newer builds." },
+                        onClick = { updateMessage = "OpenDash ${BuildConfig.VERSION_NAME} is installed. Check GitHub Releases for newer builds." },
                         variant = BtnVariant.Secondary,
                         size = BtnSize.Sm,
                     )
@@ -170,7 +200,7 @@ fun SettingsScreen(
         SettingsGroup(padding = 6.dp) {
             MoreRow(OpenDashIcons.Gear, "Settings", "Connection, ride, wallpaper, voice, units")
             SettingsDivider(Modifier.padding(horizontal = 6.dp))
-            MoreRow(OpenDashIcons.Dash, "About", "OpenDash v1.3")
+            MoreRow(OpenDashIcons.Dash, "About", "OpenDash v${BuildConfig.VERSION_NAME}")
             SettingsDivider(Modifier.padding(horizontal = 6.dp))
             MoreRow(OpenDashIcons.Bell, "Help", "Connection and dash wallpaper guidance")
             SettingsDivider(Modifier.padding(horizontal = 6.dp))
@@ -178,7 +208,7 @@ fun SettingsScreen(
             SettingsDivider(Modifier.padding(horizontal = 6.dp))
             MoreRow(OpenDashIcons.Flag, "License", "Open source notices")
             SettingsDivider(Modifier.padding(horizontal = 6.dp))
-            MoreRow(OpenDashIcons.Cal, "Changelog", "Version history", last = true)
+            MoreRow(OpenDashIcons.Cal, "Changelog", "Beta 2: rides, media/calls, GPS stability, smaller APKs", last = true)
         }
 
         // Account card
@@ -219,24 +249,126 @@ fun SettingsScreen(
                 control = { SettingsToggle(keepAwake) { keepAwake = it } }, last = true)
         }
 
-        SectionLabel("Theming")
-        SettingsGroup(padding = 14.dp) {
+        SectionLabel("Media & calls on dash")
+        SettingsGroup(padding = 6.dp) {
             SettingRow(
-                icon = OpenDashIcons.Palette,
-                title = "App-wide theme",
-                sub = selectedTheme.theme,
-                control = { OpenDashChip("Live", ChipTone.Gold) },
+                OpenDashIcons.Bell,
+                "Now playing & caller cards",
+                if (mediaAccessGranted) "Enabled for active media and calls" else "Allow notification access",
+                control = {
+                    OpenDashChip(
+                        if (mediaAccessGranted) "On" else "Enable",
+                        if (mediaAccessGranted) ChipTone.Gold else ChipTone.Off,
+                        dot = true,
+                    )
+                },
+                onClick = if (mediaAccessGranted) null else {
+                    {
+                        runCatching {
+                            ctx.startActivity(
+                                com.example.opendash.media.MediaInfoProvider.accessSettingsIntent(),
+                            )
+                        }
+                    }
+                },
+            )
+            SettingsDivider(Modifier.padding(horizontal = 6.dp))
+            SettingRow(
+                OpenDashIcons.Bt,
+                "Answer calls from joystick",
+                if (callAccessGranted) "UP answers; DOWN rejects or ends" else "Allow call controls",
+                control = {
+                    OpenDashChip(
+                        if (callAccessGranted) "On" else "Enable",
+                        if (callAccessGranted) ChipTone.Gold else ChipTone.Off,
+                        dot = true,
+                    )
+                },
+                onClick = if (callAccessGranted) null else {
+                    { callPermissionLauncher.launch(android.Manifest.permission.ANSWER_PHONE_CALLS) }
+                },
                 last = true,
             )
-            Spacer(Modifier.height(10.dp))
-            OpenDashThemeVariants.forEach { variant ->
-                ThemePaletteRow(
-                    variant = variant,
-                    selected = selectedTheme.name == variant.name,
-                    onClick = {
-                        OpenDashThemeController.select(ctx, variant)
+        }
+
+        SectionLabel("Theming")
+        SettingsGroup(padding = 6.dp) {
+            Box(Modifier.fillMaxWidth()) {
+                SettingRow(
+                    icon = OpenDashIcons.Palette,
+                    title = selectedTheme.name,
+                    sub = selectedTheme.theme,
+                    control = {
+                        Icon(
+                            OpenDashIcons.ChevronRight,
+                            contentDescription = "Choose theme",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp),
+                        )
                     },
+                    last = true,
+                    onClick = { themeMenuExpanded = true },
                 )
+                DropdownMenu(
+                    expanded = themeMenuExpanded,
+                    onDismissRequest = { themeMenuExpanded = false },
+                    modifier = Modifier
+                        .fillMaxWidth(0.94f)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                ) {
+                    OpenDashThemeVariants.forEach { variant ->
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(
+                                        variant.name,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontFamily = GeistFamily,
+                                    )
+                                    Text(
+                                        variant.theme,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 12.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                        modifier = Modifier.padding(top = 6.dp),
+                                    ) {
+                                        variant.colors.forEach { color ->
+                                            Box(
+                                                Modifier
+                                                    .size(15.dp)
+                                                    .clip(CircleShape)
+                                                    .background(color)
+                                                    .border(
+                                                        1.dp,
+                                                        MaterialTheme.colorScheme.outline.copy(alpha = 0.7f),
+                                                        CircleShape,
+                                                    ),
+                                            )
+                                        }
+                                    }
+                                }
+                            },
+                            trailingIcon = {
+                                if (selectedTheme.name == variant.name) {
+                                    Icon(
+                                        OpenDashIcons.Check,
+                                        contentDescription = "Selected",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            },
+                            onClick = {
+                                OpenDashThemeController.select(ctx, variant)
+                                themeMenuExpanded = false
+                            },
+                        )
+                    }
+                }
             }
         }
 
@@ -476,7 +608,7 @@ fun SettingsScreen(
         }
 
         Text(
-            "OpenDash v1.3 · ${if (!auth.syncAvailable) "local only" else if (auth.isSignedIn) "sync on" else "sync off"}",
+            "OpenDash v${BuildConfig.VERSION_NAME} · ${if (!auth.syncAvailable) "local only" else if (auth.isSignedIn) "sync on" else "sync off"}",
             color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, fontFamily = GeistMonoFamily,
             modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 10.dp),
         )
@@ -535,48 +667,6 @@ private fun SettingsToggle(on: Boolean, onChange: (Boolean) -> Unit) {
 }
 
 @Composable
-private fun ThemePaletteRow(
-    variant: OpenDashThemeVariant,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
-            .background(if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f) else Color.Transparent)
-            .border(1.dp, if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.45f) else Color.Transparent, RoundedCornerShape(12.dp))
-            .padding(horizontal = 10.dp, vertical = 10.dp),
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(variant.name, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, fontFamily = GeistFamily)
-            Text(variant.theme, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 8.dp)) {
-                variant.colors.forEach { color ->
-                    Box(
-                        Modifier
-                            .size(20.dp)
-                            .clip(CircleShape)
-                            .background(color)
-                            .border(1.dp, Color.White.copy(alpha = 0.75f), CircleShape),
-                    )
-                }
-            }
-        }
-        if (selected) {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier.size(28.dp).clip(CircleShape).background(variant.accentStrong),
-            ) {
-                Icon(OpenDashIcons.Check, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(17.dp))
-            }
-        }
-    }
-}
-
-@Composable
 private fun MoreRow(
     icon: ImageVector,
     title: String,
@@ -608,10 +698,14 @@ private fun SettingRow(
     sub: String? = null,
     control: @Composable () -> Unit,
     last: Boolean = false,
+    onClick: (() -> Unit)? = null,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 13.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .let { if (onClick != null) it.clickable(onClick = onClick) else it }
+            .padding(horizontal = 12.dp, vertical = 13.dp),
     ) {
         SettingsIconBubble(icon, modifier = Modifier.size(42.dp))
         Spacer(Modifier.width(14.dp))

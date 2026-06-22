@@ -48,6 +48,22 @@ class DashSession(private val scope: CoroutineScope) {
     private var routeCardJob: Job? = null
     private var heartbeatJob: Job? = null
     private var navInfoJob: Job? = null
+    private var mediaInfoJob: Job? = null
+
+    @Volatile private var mediaTitle: String? = null
+    @Volatile private var mediaAlbum = ""
+    @Volatile private var mediaArtist = ""
+    @Volatile private var callerName: String? = null
+
+    fun updateNowPlaying(title: String?, album: String, artist: String) {
+        mediaTitle = title?.takeIf { it.isNotBlank() }
+        mediaAlbum = album
+        mediaArtist = artist
+    }
+
+    fun updateCall(caller: String?) {
+        callerName = caller?.takeIf { it.isNotBlank() }
+    }
 
     // Live nav-info pushed to the dash bubble at ~1 Hz (set by NavEngine output).
     @Volatile private var navManeuver = DashCommands.NAV_MANEUVER_CONTINUE
@@ -107,6 +123,7 @@ class DashSession(private val scope: CoroutineScope) {
         launchProjectionHeartbeat()
         launchRouteCardKeepAlive()
         launchNavInfo()
+        launchMediaInfo()
     }
 
     fun sendRtp(packet: ByteArray) { socket?.sendRtp(packet) }
@@ -136,7 +153,8 @@ class DashSession(private val scope: CoroutineScope) {
         // Cancel the session coroutine FIRST so it can't race past auth and flip state to
         // READY after we tear down (which would re-trigger streaming on a dead socket).
         sessionJob?.cancel(); sessionJob = null
-        rxJob?.cancel(); projHbJob?.cancel(); routeCardJob?.cancel(); heartbeatJob?.cancel(); navInfoJob?.cancel()
+        rxJob?.cancel(); projHbJob?.cancel(); routeCardJob?.cancel(); heartbeatJob?.cancel()
+        navInfoJob?.cancel(); mediaInfoJob?.cancel()
         navActive = false
         navChromeEnabled = false
         socket?.let {
@@ -379,9 +397,30 @@ class DashSession(private val scope: CoroutineScope) {
         }
     }
 
+    private fun launchMediaInfo() {
+        mediaInfoJob?.cancel()
+        mediaInfoJob = scope.launch(Dispatchers.IO) {
+            var previousCaller: String? = null
+            while (isActive && _state.value == DashState.STREAMING) {
+                val caller = callerName
+                when {
+                    caller != null -> runCatching { socket?.send(DashCommands.callNotify(caller)) }
+                    previousCaller != null -> runCatching { socket?.send(DashCommands.callClear()) }
+                }
+                previousCaller = caller
+                mediaTitle?.let { title ->
+                    runCatching {
+                        socket?.send(DashCommands.nowPlaying(title, mediaAlbum, mediaArtist))
+                    }
+                }
+                delay(ROUTE_CARD_MS)
+            }
+        }
+    }
+
     private fun fail(msg: String) {
         DebugLog.e(TAG, { "ERROR — $msg" })
-        rxJob?.cancel(); heartbeatJob?.cancel()
+        rxJob?.cancel(); heartbeatJob?.cancel(); mediaInfoJob?.cancel()
         socket?.close(); socket = null
         _state.value = DashState.ERROR
         onError?.invoke(msg)

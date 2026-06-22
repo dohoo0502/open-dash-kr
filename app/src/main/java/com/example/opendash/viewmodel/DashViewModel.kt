@@ -29,6 +29,10 @@ import com.example.opendash.dash.video.DashEncoder
 import com.example.opendash.dash.video.DashIdleRenderer
 import com.example.opendash.dash.video.NalProcessor
 import com.example.opendash.dash.video.RtpPacketizer
+import com.example.opendash.media.CallController
+import com.example.opendash.media.CallInfoProvider
+import com.example.opendash.media.IncomingCall
+import com.example.opendash.media.MediaInfoProvider
 import com.example.opendash.util.DebugLog
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,6 +40,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
 enum class ConnStage { OFFLINE, WIFI, AUTH, STREAMING, ERROR }
+enum class GpsStatus { GOOD, WEAK, LOST }
 
 data class DashUiState(
     val stage: ConnStage = ConnStage.OFFLINE,
@@ -50,6 +55,7 @@ data class DashUiState(
     val etaMinutes: Int? = null,
     val maneuver: String? = null,
     val hasGps: Boolean = false,
+    val gpsStatus: GpsStatus = GpsStatus.LOST,
     val hasRoute: Boolean = false,
     val offRoute: Boolean = false,
     val headingUp: Boolean = true,
@@ -90,9 +96,12 @@ class DashViewModel(app: Application) : AndroidViewModel(app) {
     private val location    = LocationTracker(app)
     private val mapRenderer = MapRenderer(tiles)
     private val powerManager = app.getSystemService(Application.POWER_SERVICE) as PowerManager
+    private val mediaInfo = MediaInfoProvider(app)
+    private val callController = CallController(app)
 
     private var encoder: DashEncoder? = null
     private var streamJob: Job? = null
+    private var mediaObserveJob: Job? = null
 
     private var userWantsConnection = false
 
@@ -123,6 +132,7 @@ class DashViewModel(app: Application) : AndroidViewModel(app) {
     private var fixSpeed = 0f             // m/s
     private var fixWallMs = 0L
     private var lastFixTime = 0L
+    @Volatile private var gpsStatus = GpsStatus.LOST
 
     // Smoothed rider position shown on the dash frame (locked to the camera centre so the
     // marker stays put and the map slides under it). null = no GPS.
@@ -157,8 +167,14 @@ class DashViewModel(app: Application) : AndroidViewModel(app) {
         private const val MANUAL_IDLE_MS = 8_000L
         private const val FORCE_REDRAW_MS = 2_000L
         private const val SMOOTH_TAU = 0.28      // camera smoothing time constant (s)
-        private const val FPS_MOVING = 24        // buttery while riding
-        private const val FPS_IDLE = 7           // throttle when stopped (saves power)
+        private const val FPS_MOVING = 4
+        private const val FPS_IDLE = 2
+        private const val BTN_CALL_ANSWER = 0x06
+        private const val BTN_CALL_REJECT = 0x07
+        private const val BTN_MAP_ZOOM_IN = 0x14
+        private const val BTN_MAP_ZOOM_OUT = 0x13
+        private const val BTN_MEDIA_NEXT = 0x09
+        private const val BTN_MEDIA_PREVIOUS = 0x0A
     }
 
     /** Project a lat/lng forward [distM] metres along [bearingDeg] (great-circle). */
@@ -219,39 +235,52 @@ class DashViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         session.onError = { msg -> _ui.value = _ui.value.copy(errorMessage = msg); refreshStage() }
-        // Joystick left/right cycles idle wallpapers; during navigation it remains zoom.
         session.onButton = { btn ->
             val code = btn.toInt() and 0xFF
-            val label = when (code) {
-                0x09 -> {
-                    if (isIdleWallpaperMode()) {
-                        cycleWallpaper(1)
-                        "Next wallpaper"
-                    } else {
-                        zoomIn()
-                        "Zoom in (right)"
-                    }
+            val call = CallInfoProvider.incomingCall.value
+            val mediaActive = mediaInfo.nowPlaying.value != null
+            val label = when {
+                call?.incoming == true && code == BTN_CALL_ANSWER -> {
+                    answerCall(call)
+                    "Call answered"
                 }
-                0x0A -> {
-                    if (isIdleWallpaperMode()) {
-                        cycleWallpaper(-1)
-                        "Previous wallpaper"
-                    } else {
-                        zoomOut()
-                        "Zoom out (left)"
-                    }
+                call != null && code == BTN_CALL_REJECT -> {
+                    endCall(call)
+                    if (call.incoming) "Call rejected" else "Call ended"
                 }
-                else -> when {
-                    isIdleWallpaperMode() && isNextWallpaperButton(code) -> {
-                        cycleWallpaper(1)
-                        "Next wallpaper"
-                    }
-                    isIdleWallpaperMode() && isPreviousWallpaperButton(code) -> {
-                        cycleWallpaper(-1)
-                        "Previous wallpaper"
-                    }
-                    else -> "code 0x${code.toString(16).uppercase()}"
+                isIdleWallpaperMode() && code == BTN_MEDIA_NEXT -> {
+                    cycleWallpaper(1)
+                    "Next wallpaper"
                 }
+                isIdleWallpaperMode() && code == BTN_MEDIA_PREVIOUS -> {
+                    cycleWallpaper(-1)
+                    "Previous wallpaper"
+                }
+                !isIdleWallpaperMode() && mediaActive && code == BTN_MEDIA_NEXT -> {
+                    mediaInfo.skipNext()
+                    "Next track"
+                }
+                !isIdleWallpaperMode() && mediaActive && code == BTN_MEDIA_PREVIOUS -> {
+                    mediaInfo.skipPrevious()
+                    "Previous track"
+                }
+                code == BTN_MAP_ZOOM_IN || (!mediaActive && code == BTN_MEDIA_NEXT) -> {
+                    zoomIn()
+                    "Zoom in"
+                }
+                code == BTN_MAP_ZOOM_OUT || (!mediaActive && code == BTN_MEDIA_PREVIOUS) -> {
+                    zoomOut()
+                    "Zoom out"
+                }
+                isIdleWallpaperMode() && isNextWallpaperButton(code) -> {
+                    cycleWallpaper(1)
+                    "Next wallpaper"
+                }
+                isIdleWallpaperMode() && isPreviousWallpaperButton(code) -> {
+                    cycleWallpaper(-1)
+                    "Previous wallpaper"
+                }
+                else -> "code 0x${code.toString(16).uppercase()}"
             }
             _ui.value = _ui.value.copy(lastButton = label)
         }
@@ -319,7 +348,9 @@ class DashViewModel(app: Application) : AndroidViewModel(app) {
         recorder.start()
         recordJob = viewModelScope.launch {
             location.location.collect { loc ->
-                if (loc != null) recorder.add(loc.latitude, loc.longitude, loc.speed, loc.time)
+                if (loc != null) {
+                    recorder.add(loc.latitude, loc.longitude, loc.speed, loc.accuracy, loc.time)
+                }
             }
         }
     }
@@ -625,6 +656,7 @@ class DashViewModel(app: Application) : AndroidViewModel(app) {
         camInit = false; lastTickNs = 0L; lastFixTime = 0L
 
         session.startStreaming()
+        startMediaForwarding()
         location.location.value?.let { tiles.prefetch(it.latitude, it.longitude) }
 
         streamJob = viewModelScope.launch(Dispatchers.Default) {
@@ -697,7 +729,13 @@ class DashViewModel(app: Application) : AndroidViewModel(app) {
         if (r != null && loc != null) {
             val ns = trackProgress(r, GeoPoint(loc.latitude, loc.longitude))
             remainingM = ns.remainingM
-            offRoute = ns.offRoute
+            val headingKnown = loc.hasBearing() && loc.speed >= 1.5f
+            val headingOff = headingKnown && angleDelta(loc.bearing, ns.heading) > 50f
+            offRoute = when {
+                ns.snapDist > 150.0 -> true
+                ns.snapDist > 70.0 -> headingOff
+                else -> false
+            }
             // NOTE: no marker snapping. Raw GPS is accurate; snapping to the route
             // polyline pinned the rider onto a parallel road in dense areas (showed
             // "Indira Enclave" when actually at "Isha"). trackProgress is still used
@@ -738,9 +776,17 @@ class DashViewModel(app: Application) : AndroidViewModel(app) {
         // Recompute the route if the rider has clearly left it for a few seconds.
         maybeReroute(offRoute, loc)
 
+        val fixAgeMs = loc?.let { System.currentTimeMillis() - it.time } ?: Long.MAX_VALUE
+        gpsStatus = when {
+            loc == null || fixAgeMs > 4_000L -> GpsStatus.LOST
+            loc.accuracy > 25f -> GpsStatus.WEAK
+            else -> GpsStatus.GOOD
+        }
+
         // Publish nav figures to the phone UI.
         _ui.value = _ui.value.copy(
             hasGps = loc != null,
+            gpsStatus = gpsStatus,
             riderLat = matchedLat,
             riderLng = matchedLng,
             riderBearing = heading,
@@ -823,6 +869,7 @@ class DashViewModel(app: Application) : AndroidViewModel(app) {
             append(if (headingUp) (camHeading * 10).toInt() else 0)
             append(remainingM?.let { (it / 100).toInt() } ?: -1) // 100 m resolution to avoid jitter
             append(if (r != null) r.geometry.size else 0)
+            append(CallInfoProvider.incomingCall.value?.takeIf { it.incoming }?.caller.orEmpty())
         }
         val now = System.currentTimeMillis()
         if (sig != lastSignature || now - lastRedrawAt > FORCE_REDRAW_MS) {
@@ -868,14 +915,16 @@ class DashViewModel(app: Application) : AndroidViewModel(app) {
         val bmp = frameBitmap ?: return
         val loc = location.location.value
         if (route == null && destLat == null && destLng == null) {
+            val canvas = Canvas(bmp)
             idleRenderer.draw(
-                Canvas(bmp),
+                canvas,
                 _ui.value.wallpaperPath,
                 _ui.value.wallpaperKind,
                 _ui.value.wallpaperCropX,
                 _ui.value.wallpaperCropY,
                 _ui.value.wallpaperFit,
             )
+            drawCallOverlay(canvas, bmp.width, bmp.height)
             return
         }
         // Glanceable ETA — minutes remaining + a stable 12-hour arrival clock. Both come
@@ -913,8 +962,53 @@ class DashViewModel(app: Application) : AndroidViewModel(app) {
             tilt3d = false,
             etaPrimary = etaPrimary,
             etaSecondary = etaSecondary,
+            gpsWeak = gpsStatus == GpsStatus.WEAK,
+            gpsLost = gpsStatus == GpsStatus.LOST,
         )
-        mapRenderer.draw(Canvas(bmp), frame)
+        val canvas = Canvas(bmp)
+        mapRenderer.draw(canvas, frame)
+        drawCallOverlay(canvas, bmp.width, bmp.height)
+    }
+
+    private val callOverlayBackground by lazy {
+        android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xDD0B0D0E.toInt()
+        }
+    }
+    private val callOverlayTitle by lazy {
+        android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.WHITE
+            textSize = 15f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            textAlign = android.graphics.Paint.Align.CENTER
+        }
+    }
+    private val callOverlayLabel by lazy {
+        android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xFFF2A93B.toInt()
+            textSize = 10f
+            textAlign = android.graphics.Paint.Align.CENTER
+        }
+    }
+
+    private fun drawCallOverlay(canvas: Canvas, width: Int, height: Int) {
+        val call = CallInfoProvider.incomingCall.value ?: return
+        if (!call.incoming) return
+        val centerX = width / 2f
+        val centerY = height / 2f
+        val halfWidth = height * 0.30f
+        canvas.drawRoundRect(
+            centerX - halfWidth,
+            centerY - 27f,
+            centerX + halfWidth,
+            centerY + 27f,
+            10f,
+            10f,
+            callOverlayBackground,
+        )
+        val caller = if (call.caller.length > 16) call.caller.take(15) + "..." else call.caller
+        canvas.drawText(caller, centerX, centerY - 2f, callOverlayTitle)
+        canvas.drawText("UP answer | DOWN reject", centerX, centerY + 17f, callOverlayLabel)
     }
 
     // ── Monotonic route-progress tracker ────────────────────────────────────
@@ -988,11 +1082,56 @@ class DashViewModel(app: Application) : AndroidViewModel(app) {
     private fun fmtDist(m: Double): String =
         if (m < 1000) "${m.toInt()} m" else "%.1f km".format(m / 1000.0)
 
+    private fun angleDelta(first: Float, second: Float): Float {
+        val delta = (((first - second) % 360f) + 540f) % 360f - 180f
+        return kotlin.math.abs(delta)
+    }
+
     private fun teardown() {
         streamJob?.cancel(); streamJob = null
+        stopMediaForwarding()
         encoder?.release(); encoder = null
         idleRenderer.release()
         frameBitmap?.recycle(); frameBitmap = null
+    }
+
+    private fun startMediaForwarding() {
+        mediaInfo.start()
+        mediaObserveJob?.cancel()
+        mediaObserveJob = viewModelScope.launch {
+            launch {
+                mediaInfo.nowPlaying.collect { media ->
+                    session.updateNowPlaying(
+                        media?.title,
+                        media?.album.orEmpty(),
+                        media?.artist.orEmpty(),
+                    )
+                }
+            }
+            launch {
+                CallInfoProvider.incomingCall.collect { call ->
+                    session.updateCall(call?.caller)
+                }
+            }
+        }
+    }
+
+    private fun stopMediaForwarding() {
+        mediaObserveJob?.cancel()
+        mediaObserveJob = null
+        mediaInfo.stop()
+        session.updateNowPlaying(null, "", "")
+        session.updateCall(null)
+    }
+
+    private fun answerCall(call: IncomingCall) {
+        val handled = call.answerIntent?.let { runCatching { it.send() }.isSuccess } ?: false
+        if (!handled) callController.answer()
+    }
+
+    private fun endCall(call: IncomingCall) {
+        val handled = call.declineIntent?.let { runCatching { it.send() }.isSuccess } ?: false
+        if (!handled) callController.hangup()
     }
 
     override fun onCleared() {

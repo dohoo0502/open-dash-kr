@@ -40,6 +40,8 @@ class MapRenderer(private val tiles: TileProvider) {
         val tilt3d: Boolean = false,       // perspective 3D view (nav heading-up only)
         val etaPrimary: String? = null,    // big glance value, e.g. "24 min" (nav only)
         val etaSecondary: String? = null,  // smaller line, e.g. "18 km · 13:32"
+        val gpsWeak: Boolean = false,
+        val gpsLost: Boolean = false,
     )
 
     private val bgColor   = Color.rgb(229, 227, 223) // Google Maps land colour, behind missing tiles
@@ -71,6 +73,11 @@ class MapRenderer(private val tiles: TileProvider) {
     private val etaBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(46, 255, 255, 255); style = Paint.Style.STROKE; strokeWidth = 1.5f }
     private val etaBigPaint    = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(126, 217, 87); textSize = 20f; isFakeBoldText = true; textAlign = Paint.Align.CENTER }   // Google-nav green
     private val etaSmallPaint  = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(196, 201, 208); textSize = 12f; textAlign = Paint.Align.CENTER }
+    private val gpsPillText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = 13f
+        isFakeBoldText = true
+        textAlign = Paint.Align.CENTER
+    }
 
     // Reused across frames
     private val routePath = Path()
@@ -160,7 +167,18 @@ class MapRenderer(private val tiles: TileProvider) {
         // ── Rider marker (Google blue) ──
         if (f.riderLat != null && f.riderLng != null) {
             val rx = sx(f.riderLng); val ry = sy(f.riderLat)
-            dotPaint.color = Color.argb(60, 66, 133, 244); canvas.drawCircle(rx, ry, 17f, dotPaint)
+            val markerColor = when {
+                f.gpsLost -> Color.rgb(150, 154, 160)
+                f.gpsWeak -> Color.rgb(251, 188, 5)
+                else -> routeBlue
+            }
+            dotPaint.color = Color.argb(
+                60,
+                Color.red(markerColor),
+                Color.green(markerColor),
+                Color.blue(markerColor),
+            )
+            canvas.drawCircle(rx, ry, 17f, dotPaint)
             if (rotate) {
                 // Heading-up: blue chevron pointing up (travel direction)
                 riderPath.reset()
@@ -170,11 +188,11 @@ class MapRenderer(private val tiles: TileProvider) {
                 riderPath.close()
                 canvas.save(); canvas.rotate(f.heading, rx, ry)
                 dotPaint.color = Color.WHITE; canvas.drawCircle(rx, ry, 9f, dotPaint)
-                dotPaint.color = routeBlue; canvas.drawPath(riderPath, dotPaint)
+                dotPaint.color = markerColor; canvas.drawPath(riderPath, dotPaint)
                 canvas.restore()
             } else {
                 dotPaint.color = Color.WHITE; canvas.drawCircle(rx, ry, 8f, dotPaint)
-                dotPaint.color = routeBlue; canvas.drawCircle(rx, ry, 5.5f, dotPaint)
+                dotPaint.color = markerColor; canvas.drawCircle(rx, ry, 5.5f, dotPaint)
             }
         }
 
@@ -206,6 +224,22 @@ class MapRenderer(private val tiles: TileProvider) {
                 baseline += bigFm.descent + gap - smallFm.ascent
                 canvas.drawText(secondary, cxp, baseline, etaSmallPaint)
             }
+        }
+
+        if (f.gpsLost || f.gpsWeak) {
+            val label = if (f.gpsLost) "GPS lost" else "GPS weak"
+            gpsPillText.color = if (f.gpsLost) googleRed else Color.rgb(251, 188, 5)
+            val font = gpsPillText.fontMetrics
+            val textHeight = font.descent - font.ascent
+            val pillWidth = gpsPillText.measureText(label) + 28f
+            val center = w / 2f
+            val top = 14f
+            val bottom = top + 12f + textHeight
+            pillRect.set(center - pillWidth / 2f, top, center + pillWidth / 2f, bottom)
+            val radius = (bottom - top) / 2f
+            canvas.drawRoundRect(pillRect, radius, radius, etaBgPaint)
+            canvas.drawRoundRect(pillRect, radius, radius, etaBorderPaint)
+            canvas.drawText(label, center, top + 6f - font.ascent, gpsPillText)
         }
 
         // No other on-map text overlays — the dash's own widgets show name/turn, and the

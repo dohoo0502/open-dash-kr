@@ -24,6 +24,7 @@ import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialException
+import com.example.opendash.BuildConfig
 import com.example.opendash.ui.components.CircularDash
 import com.example.opendash.ui.components.BtnShape
 import com.example.opendash.ui.theme.*
@@ -31,9 +32,6 @@ import com.example.opendash.viewmodel.AuthViewModel
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import kotlinx.coroutines.launch
-
-private const val WEB_CLIENT_ID =
-    "246319873644-tr50gd0sflk4rqee8hcjt3m34subj4un.apps.googleusercontent.com"
 
 @Composable
 fun LoginScreen(
@@ -52,12 +50,16 @@ fun LoginScreen(
 
     fun launchGoogleSignIn() {
         cmError = null
+        if (BuildConfig.GOOGLE_WEB_CLIENT_ID.isBlank()) {
+            cmError = "Google sign-in is not configured for this build"
+            return
+        }
         scope.launch {
             try {
                 val credentialManager = CredentialManager.create(context)
                 val request = GetCredentialRequest.Builder()
                     .addCredentialOption(
-                        GetSignInWithGoogleOption.Builder(WEB_CLIENT_ID).build()
+                        GetSignInWithGoogleOption.Builder(BuildConfig.GOOGLE_WEB_CLIENT_ID).build()
                     )
                     .build()
                 val result = credentialManager.getCredential(context, request)

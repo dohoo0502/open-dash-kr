@@ -37,11 +37,11 @@ fun RouteScreen(
 ) {
     val routeState by routeViewModel.state.collectAsState()
     val dest       = routeState.destination
-    val destName   = dest?.name?.ifBlank { "Shared location" } ?: "Shared location"
+    val destName   = dest?.name?.ifBlank { "공유한 목적지" } ?: "공유한 목적지"
     val destSub    = when {
         dest?.lat != null && dest.lng != null ->
             "%.5f, %.5f".format(dest.lat, dest.lng)
-        dest?.url != null -> "Maps link"
+        dest?.url != null -> "지도 공유 링크"
         else              -> ""
     }
 
@@ -50,9 +50,9 @@ fun RouteScreen(
     val voiceManager = remember { com.example.opendash.dash.nav.VoiceManager.get(ctx) }
     val voiceMode by voiceManager.mode.collectAsState()
     val voice = when (voiceMode) {
-        com.example.opendash.dash.nav.VoiceMode.OFF   -> "Off"
-        com.example.opendash.dash.nav.VoiceMode.CHIME -> "Chime only"
-        com.example.opendash.dash.nav.VoiceMode.FULL  -> "Full TTS"
+        com.example.opendash.dash.nav.VoiceMode.OFF   -> "끄기"
+        com.example.opendash.dash.nav.VoiceMode.CHIME -> "알림음"
+        com.example.opendash.dash.nav.VoiceMode.FULL  -> "음성 안내"
     }
     var sent by remember { mutableStateOf(false) }
     var showSave by remember { mutableStateOf(false) }
@@ -73,7 +73,6 @@ fun RouteScreen(
                 .fillMaxHeight(0.46f)
                 .background(MapBase),
         ) {
-            // Real Google Maps preview — destination pin + route line.
             OpenDashMap(
                 riderLat = null,
                 riderLng = null,
@@ -103,7 +102,7 @@ fun RouteScreen(
                 )
                 Spacer(Modifier.width(12.dp))
                 OpenDashChip(
-                    if (routeState.isResolving) "Resolving link…" else "Shared from Google Maps",
+                    if (routeState.isResolving) "목적지 불러오는 중…" else "공유 목적지",
                     tone = if (routeState.isResolving) ChipTone.Gold else ChipTone.Neutral,
                     icon = OpenDashIcons.Share,
                     modifier = Modifier.background(Color(0xB30D0F11), CircleShape),
@@ -133,7 +132,7 @@ fun RouteScreen(
 
             Spacer(Modifier.height(12.dp))
 
-            Eyebrow("Destination", Modifier.padding(bottom = 6.dp))
+            Eyebrow("목적지", Modifier.padding(bottom = 6.dp))
 
             Row(verticalAlignment = Alignment.Top) {
                 Box(
@@ -148,7 +147,7 @@ fun RouteScreen(
                 Spacer(Modifier.width(12.dp))
                 Column {
                     if (routeState.isResolving) {
-                        Text("Resolving…", color = TextLo, fontSize = 19.sp, fontWeight = FontWeight.Bold, fontFamily = GeistFamily, letterSpacing = (-0.38).sp)
+                        Text("불러오는 중…", color = TextLo, fontSize = 19.sp, fontWeight = FontWeight.Bold, fontFamily = GeistFamily, letterSpacing = (-0.38).sp)
                     } else {
                         Text(destName, color = TextHi, fontSize = 19.sp, fontWeight = FontWeight.Bold, fontFamily = GeistFamily, letterSpacing = (-0.38).sp)
                     }
@@ -163,9 +162,9 @@ fun RouteScreen(
             // Route stats (real values once routing completes)
             val routing = routeState.routing
             val statsList = listOf(
-                Triple(if (routing) "…" else (routeState.distanceText ?: "—"), "", "Distance"),
-                Triple(if (routing) "…" else (routeState.durationText ?: "—"), "", "Duration"),
-                Triple(if (routing) "…" else (routeState.etaText ?: "—"), "", "Arrive"),
+                Triple(if (routing) "…" else (routeState.distanceText ?: "—"), "", "거리"),
+                Triple(if (routing) "…" else (routeState.durationText ?: "—"), "", "소요 시간"),
+                Triple(if (routing) "…" else (routeState.etaText ?: "—"), "", "도착 예정"),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 statsList.forEach { (v, u, k) ->
@@ -194,22 +193,22 @@ fun RouteScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth().padding(bottom = 9.dp),
             ) {
-                Eyebrow("Voice guidance")
+                Eyebrow("안내 방식")
                 Icon(
-                    if (voice == "Off") OpenDashIcons.SpeakerOff else OpenDashIcons.Speaker,
+                    if (voice == "끄기") OpenDashIcons.SpeakerOff else OpenDashIcons.Speaker,
                     contentDescription = null,
-                    tint = if (voice == "Off") TextLo else Gold,
+                    tint = if (voice == "끄기") TextLo else Gold,
                     modifier = Modifier.size(18.dp),
                 )
             }
 
             OpenDashSegmented(
-                options = listOf("Off", "Chime only", "Full TTS"),
+                options = listOf("끄기", "알림음", "음성 안내"),
                 selected = voice,
                 onSelect = {
                     voiceManager.setMode(when (it) {
-                        "Off"  -> com.example.opendash.dash.nav.VoiceMode.OFF
-                        "Full TTS" -> com.example.opendash.dash.nav.VoiceMode.FULL
+                        "끄기"  -> com.example.opendash.dash.nav.VoiceMode.OFF
+                        "음성 안내" -> com.example.opendash.dash.nav.VoiceMode.FULL
                         else   -> com.example.opendash.dash.nav.VoiceMode.CHIME
                     })
                 },
@@ -219,10 +218,10 @@ fun RouteScreen(
             val canStart = dest?.lat != null && dest.lng != null && !routeState.isResolving
             OpenDashBtn(
                 label = when {
-                    sent                   -> "Starting navigation…"
-                    routeState.isResolving -> "Resolving destination…"
-                    routeState.routing     -> "Finding route…"
-                    else                   -> "Start navigation"
+                    sent                   -> "길안내 시작 중…"
+                    routeState.isResolving -> "목적지 불러오는 중…"
+                    routeState.routing     -> "경로 찾는 중…"
+                    else                   -> "길안내 시작"
                 },
                 onClick = { sent = true },
                 icon = if (sent) OpenDashIcons.Check else OpenDashIcons.Navi,
@@ -235,7 +234,7 @@ fun RouteScreen(
             if (canStart) {
                 Spacer(Modifier.height(10.dp))
                 OpenDashBtn(
-                    label = "Save this destination",
+                    label = "목적지 저장",
                     onClick = { showSave = true },
                     icon = OpenDashIcons.Pin,
                     variant = BtnVariant.Ghost,
@@ -247,7 +246,7 @@ fun RouteScreen(
             // ── Saved destinations ──
             if (savedList.isNotEmpty()) {
                 Spacer(Modifier.height(22.dp))
-                Eyebrow("Saved destinations", Modifier.padding(bottom = 6.dp, start = 4.dp))
+                Eyebrow("저장한 목적지", Modifier.padding(bottom = 6.dp, start = 4.dp))
                 OpenDashCard(modifier = Modifier.fillMaxWidth(), padding = 6.dp) {
                     savedList.forEachIndexed { i, loc ->
                         if (i > 0) OpenDashDivider(Modifier.padding(horizontal = 4.dp))
@@ -304,13 +303,13 @@ private fun SaveLocationDialog(defaultName: String, onSave: (String, String) -> 
     var note by remember { mutableStateOf("") }
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
-        confirmButton = { androidx.compose.material3.TextButton(enabled = name.isNotBlank(), onClick = { onSave(name.trim(), note.trim()) }) { Text("Save", color = if (name.isNotBlank()) Gold else TextLo) } },
-        dismissButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Cancel", color = TextMid) } },
-        title = { Text("Save destination", color = TextHi) },
+        confirmButton = { androidx.compose.material3.TextButton(enabled = name.isNotBlank(), onClick = { onSave(name.trim(), note.trim()) }) { Text("저장", color = if (name.isNotBlank()) Gold else TextLo) } },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("취소", color = TextMid) } },
+        title = { Text("목적지 저장", color = TextHi) },
         text = {
             Column {
-                androidx.compose.material3.OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                androidx.compose.material3.OutlinedTextField(note, { note = it }, label = { Text("Note (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+                androidx.compose.material3.OutlinedTextField(name, { name = it }, label = { Text("이름") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                androidx.compose.material3.OutlinedTextField(note, { note = it }, label = { Text("메모 선택") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
             }
         },
         containerColor = Surf1,
@@ -323,16 +322,15 @@ private fun EditLocationDialog(loc: com.example.opendash.data.SavedLocation, onS
     var note by remember { mutableStateOf(loc.note) }
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
-        confirmButton = { androidx.compose.material3.TextButton(enabled = name.isNotBlank(), onClick = { onSave(name.trim(), note.trim()) }) { Text("Save", color = if (name.isNotBlank()) Gold else TextLo) } },
-        dismissButton = { androidx.compose.material3.TextButton(onClick = onDelete) { Text("Delete", color = Alert) } },
-        title = { Text("Edit destination", color = TextHi) },
+        confirmButton = { androidx.compose.material3.TextButton(enabled = name.isNotBlank(), onClick = { onSave(name.trim(), note.trim()) }) { Text("저장", color = if (name.isNotBlank()) Gold else TextLo) } },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = onDelete) { Text("삭제", color = Alert) } },
+        title = { Text("목적지 수정", color = TextHi) },
         text = {
             Column {
-                androidx.compose.material3.OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                androidx.compose.material3.OutlinedTextField(note, { note = it }, label = { Text("Note") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+                androidx.compose.material3.OutlinedTextField(name, { name = it }, label = { Text("이름") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                androidx.compose.material3.OutlinedTextField(note, { note = it }, label = { Text("메모") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
             }
         },
         containerColor = Surf1,
     )
 }
-

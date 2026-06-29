@@ -64,6 +64,11 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".ui.screens.KakaoNaviActivity"
+            android:exported="false"
+            android:theme="@style/Theme.OpenDash" />
+
         <service
             android:name=".dash.DashKeepAliveService"
             android:exported="false"

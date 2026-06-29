@@ -19,8 +19,9 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven("https://devrepo.kakaomobility.com/repository/kakao-mobility-android-knsdk-public/")
+        maven("https://www.jitpack.io")
     }
 }
-
 rootProject.name = "OpenDash"
 include(":app")

@@ -28,6 +28,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import android.content.Intent
+import androidx.compose.ui.platform.LocalContext
 import com.example.opendash.ui.OpenDashIcons
 import com.example.opendash.ui.screens.*
 import com.example.opendash.ui.theme.*
@@ -45,6 +47,7 @@ sealed class Screen(val route: String) {
     object Expenses : Screen("expenses")
     object Route    : Screen("route")
     object Dash     : Screen("dash")
+    object KakaoNaviTest : Screen("kakao_navi_test")
     object Garage   : Screen("garage")
     object Rides    : Screen("rides")
     object Settings : Screen("settings")
@@ -61,7 +64,13 @@ private val bottomTabs = listOf(
 )
 
 private val bottomRoutes = bottomTabs.map { it.screen.route }
-private val homeChildRoutes = listOf(Screen.Route.route, Screen.Dash.route, Screen.Rides.route)
+private val homeChildRoutes = listOf(
+    Screen.Route.route,
+    Screen.Dash.route,
+    Screen.KakaoNaviTest.route,
+    Screen.Rides.route,
+)
+
 private val shellRoutes = bottomRoutes + homeChildRoutes
 
 @Composable
@@ -72,6 +81,7 @@ fun AppNavigation(
     routeViewModel: RouteViewModel = viewModel(),
 ) {
     val navController = rememberNavController()
+    val context = LocalContext.current
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
@@ -223,13 +233,15 @@ fun AppNavigation(
                                 lat  = routeState.destination?.lat,
                                 lng  = routeState.destination?.lng,
                             )
-                            // Start navigation: open the dash view and begin the
-                            // WiFi → auth → stream flow (no-op if already streaming).
-                            dashViewModel.connect()
-                            navController.navigate(Screen.Dash.route) {
-                                popUpTo(Screen.Home.route)
+
+                            val intent = Intent(context, KakaoNaviActivity::class.java).apply {
+                                putExtra("dest_name", destName)
+                                putExtra("dest_lat", routeState.destination?.lat ?: 0.0)
+                                putExtra("dest_lng", routeState.destination?.lng ?: 0.0)
                             }
-                        },
+
+                            context.startActivity(intent)
+                        }
                     )
                 }
 
@@ -237,6 +249,11 @@ fun AppNavigation(
                     DashScreen(vm = dashViewModel)
                 }
 
+                composable(Screen.KakaoNaviTest.route) {
+                    KakaoNaviTestScreen(
+                        onBack = { navController.navigate(Screen.Route.route) { launchSingleTop = true } },
+                    )
+                }
                 composable(Screen.Garage.route) {
                     GarageScreen(
                         tab = garageTab,
@@ -283,8 +300,9 @@ private fun transitionDirection(fromRoute: String?, toRoute: String?): Int =
 private fun navOrderIndex(route: String?): Int = when (route) {
     Screen.Home.route -> 0
     Screen.Route.route -> 1
-    Screen.Dash.route -> 2
-    Screen.Rides.route -> 3
+    Screen.KakaoNaviTest.route -> 2
+    Screen.Dash.route -> 3
+    Screen.Rides.route -> 4
     Screen.Vehicles.route -> 10
     Screen.Expenses.route -> 20
     Screen.Garage.route -> 30

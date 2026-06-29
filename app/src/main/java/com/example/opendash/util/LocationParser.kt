@@ -20,6 +20,18 @@ object LocationParser {
         "maps.app.goo.gl",
         "goo.gl",
         "g.co",
+
+        // Kakao Map
+        "map.kakao.com",
+        "place.map.kakao.com",
+        "kko.kakao.com",
+        "kko.to",
+
+        // Naver Map
+        "map.naver.com",
+        "m.map.naver.com",
+        "map.naver.me",
+        "naver.me",
     )
 
     private val urlRegex  = Regex("https?://[^\\s)]+")
@@ -31,6 +43,11 @@ object LocationParser {
     private val coordSearch = Regex("/search/(-?\\d+\\.\\d+),\\+?(-?\\d+\\.\\d+)")
     private val placePath = Regex("/place/([^/@?]+)")
     private val placeQ    = Regex("[?&]q=([^&0-9\\-@][^&]*)")
+    private val kakaoLinkLatLng = Regex("/link/(?:map|to)/[^,]+,(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)")
+    private val kakaoXY = Regex("[?&](?:x|urlX)=(-?\\d+\\.\\d+).*?[?&](?:y|urlY)=(-?\\d+\\.\\d+)")
+    private val naverLngLatC = Regex("[?&]c=(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)")
+    private val naverLngLat = Regex("[?&](?:lng|x)=(-?\\d+\\.\\d+).*?[?&](?:lat|y)=(-?\\d+\\.\\d+)")
+    private val kakaoPlacePath = Regex("/link/(?:map|to)/([^,/?#]+)")
 
     // Body-scan patterns (Google embeds coords in the place page when the URL doesn't carry them).
     private val bodyPatterns = listOf(
@@ -53,8 +70,14 @@ object LocationParser {
         val rejectedUrl = candidateUrl != null && url == null
 
         val isShort = url != null && (
-            url.contains("maps.app.goo.gl") || url.contains("goo.gl/maps") ||
-            url.contains("g.co/kgs") || url.contains("//goo.gl/"))
+                url.contains("maps.app.goo.gl") ||
+                        url.contains("goo.gl/maps") ||
+                        url.contains("g.co/kgs") ||
+                        url.contains("//goo.gl/") ||
+                        url.contains("kko.kakao.com") ||
+                        url.contains("kko.to") ||
+                        url.contains("naver.me")
+                )
 
         val textBefore = url?.let { trimmed.substringBefore(it).trim() }
         val textName = textBefore?.lines()?.lastOrNull { it.isNotBlank() }
@@ -102,17 +125,32 @@ object LocationParser {
     }
 
     fun extractCoords(s: String): Pair<Double, Double>? {
-        for (regex in listOf(coord3d4d, coordGeo, coordSearch, coordAt, coordQ, coordLl)) {
+        // Google / geo: style: latitude,longitude
+        for (regex in listOf(coord3d4d, coordGeo, coordSearch, coordAt, coordQ, coordLl, kakaoLinkLatLng)) {
             val m = regex.find(s) ?: continue
             val pair = m.groupValues[1].toDoubleOrNull()?.let { lat ->
                 m.groupValues[2].toDoubleOrNull()?.let { lng -> lat to lng }
             } ?: continue
             if (valid(pair.first, pair.second)) return pair
         }
+
+        // Kakao/Naver URL params often use x/y or lng/lat order: longitude,latitude
+        for (regex in listOf(kakaoXY, naverLngLatC, naverLngLat)) {
+            val m = regex.find(s) ?: continue
+            val pair = m.groupValues[1].toDoubleOrNull()?.let { lng ->
+                m.groupValues[2].toDoubleOrNull()?.let { lat -> lat to lng }
+            } ?: continue
+            if (valid(pair.first, pair.second)) return pair
+        }
+
         return null
     }
 
     fun extractPlaceName(s: String): String? {
+        kakaoPlacePath.find(s)?.let { m ->
+            return URLDecoder.decode(m.groupValues[1].replace("+", " "), "UTF-8")
+                .replace("_", " ").trim().ifBlank { null }
+        }
         placePath.find(s)?.let { m ->
             return URLDecoder.decode(m.groupValues[1].replace("+", " "), "UTF-8")
                 .replace("_", " ").trim().ifBlank { null }
@@ -193,8 +231,14 @@ object LocationParser {
     private fun isAllowedNetworkUrl(value: String): Boolean {
         val uri = runCatching { URI(value) }.getOrNull() ?: return false
         if (!uri.scheme.equals("https", ignoreCase = true)) return false
+
         val host = uri.host?.lowercase() ?: return false
-        return host in allowedMapHosts
+
+        return host in allowedMapHosts ||
+                host.endsWith(".google.com") ||
+                host.endsWith(".kakao.com") ||
+                host.endsWith(".naver.com") ||
+                host.endsWith(".naver.me")
     }
 
     private fun resolvedRedirectUrl(base: String, location: String): String =

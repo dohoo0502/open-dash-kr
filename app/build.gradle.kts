@@ -21,6 +21,12 @@ val localProperties = Properties().apply {
 val googleWebClientId = providers.gradleProperty("GOOGLE_WEB_CLIENT_ID").orNull
     ?: localProperties.getProperty("GOOGLE_WEB_CLIENT_ID").orEmpty()
 
+val kakaoRestApiKey = providers.gradleProperty("KAKAO_REST_API_KEY").orNull
+    ?: localProperties.getProperty("KAKAO_REST_API_KEY").orEmpty()
+
+val kakaoNativeAppKey = providers.gradleProperty("KAKAO_NATIVE_APP_KEY").orNull
+    ?: localProperties.getProperty("KAKAO_NATIVE_APP_KEY").orEmpty()
+
 val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("key.properties")
 
@@ -37,16 +43,32 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.opendash.app"
-        minSdk = 24
+        applicationId = "com.odt.opendashkr"
+        minSdk = 26
         targetSdk = 36
         versionCode = 16
         versionName = "1.3.1"
+
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+        }
 
         buildConfigField(
             "String",
             "GOOGLE_WEB_CLIENT_ID",
             "\"${googleWebClientId.replace("\\", "\\\\").replace("\"", "\\\"")}\"",
+        )
+
+        buildConfigField(
+            "String",
+            "KAKAO_REST_API_KEY",
+            "\"${kakaoRestApiKey.replace("\\", "\\\\").replace("\"", "\\\"")}\"",
+        )
+
+        buildConfigField(
+            "String",
+            "KAKAO_NATIVE_APP_KEY",
+            "\"${kakaoNativeAppKey.replace("\\", "\\\\").replace("\"", "\\\"")}\"",
         )
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -83,7 +105,6 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix = ".mui3"
             resValue("string", "app_name", "OpenDash")
         }
         release {
@@ -110,6 +131,7 @@ android {
         buildConfig = true
         compose = true
         resValues = true
+        viewBinding = true
     }
 
     // GitHub releases can publish the matching ABI APK (arm64 for most current phones)
@@ -119,13 +141,17 @@ android {
         abi {
             isEnable = true
             reset()
-            include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            include("armeabi-v7a", "arm64-v8a")
             isUniversalApk = true
         }
     }
 }
 
 dependencies {
+    implementation("com.kakaomobility.knsdk:knsdk_ui:1.12.7")
+    implementation("androidx.constraintlayout:constraintlayout:2.2.1")
+    implementation("androidx.appcompat:appcompat:1.7.1")
+    implementation("androidx.databinding:viewbinding:8.11.1")
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)
